@@ -66,6 +66,8 @@ textarea{font-size:14px;min-height:64px}
 .kpi{display:flex;flex-direction:column;gap:0;min-width:0}
 .kpi b{font-size:19px;font-variant-numeric:tabular-nums;white-space:nowrap}
 .kpi span{font-size:11px;color:var(--muted)}
+.ask-claude{padding:13px;border:0;border-radius:12px;background:var(--fg);color:var(--bg);font-size:16px;font-weight:700;cursor:pointer}
+#askText{width:100%;min-height:120px;font-size:12px}
 .periods{display:flex;gap:6px;justify-content:flex-end}
 .periods button{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:2px 10px;font-size:12px;cursor:pointer}
 .periods button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
@@ -461,7 +463,8 @@ function render(R){
   const img = im ? "https://m.media-amazon.com/images/I/" + im : "";
   const asin = p.asin;
   let h = '<section class="view ' + R.verdict + '"><div class="eyebrow">グラフの見立て</div><div class="big">' + esc(R.head) + '</div>' +
-          '<div class="say">' + R.say.map(s => '<p>' + esc(s) + '</p>').join("") + '</div>';
+          '<div class="say">' + R.say.map(s => '<p>' + esc(s) + '</p>').join("") + '</div>' +
+          '<button type="button" class="ask-claude" id="askBtn">迷ったら Claude に聞く（コピー）</button><textarea id="askText" readonly hidden></textarea>';
   if (R.main){
     h += chart(R, period);
     h += '<div class="kpis"><div class="kpi"><span>売値（'+(R.cartNow?"カート":"最安値")+'）</span><b>'+yen(R.now)+'</b></div><div class="kpi"><span>利益</span><b>'+yen(R.main.profit)+'</b></div><div class="kpi"><span>利益率</span><b>'+pct(R.main.rate)+'</b></div></div>';
@@ -488,6 +491,35 @@ function render(R){
   h += '<div class="links"><a href="https://www.amazon.co.jp/dp/'+asin+'" target="_blank" rel="noopener">Amazon</a><a href="https://keepa.com/#!product/5-'+asin+'" target="_blank" rel="noopener">Keepa</a><a href="https://sellercentral.amazon.co.jp/product-search/search?q='+asin+'" target="_blank" rel="noopener">出品できるか</a></div>';
   $("out").innerHTML = h;
   bindPeriods();
+  $("askBtn").onclick = async () => {
+    const t = askText(R), btn = $("askBtn");
+    try { await navigator.clipboard.writeText(t); btn.textContent = "コピーしました。Claude のトークに貼り付けて送ってください"; }
+    catch(e){ const ta = $("askText"); ta.value = t; ta.hidden = false; ta.focus(); ta.select(); btn.textContent = "下の文を長押しで全部コピーして、Claude に貼り付けてください"; }
+  };
+}
+/* ---------- Claude に聞くための文 ---------- */
+function askText(R){
+  const p = R.p, n = v => v == null ? "なし" : Math.round(v).toLocaleString("ja-JP");
+  const weeks = []; for (let w = 25; w >= 0; w--){ const a = vals(R.price, (w+1)*7, w*7); weeks.push(a.length ? n(median(a)) : "なし"); }
+  const months = []; for (let m = 11; m >= 0; m--){ const a = vals(R.rankD, (m+1)*30, m*30); months.push(a.length ? n(median(a)) : "なし"); }
+  const amzM = []; for (let m = 11; m >= 0; m--) amzM.push(vals(R.amz, (m+1)*30, m*30).length);
+  const cntM = []; for (let m = 5; m >= 0; m--){ const a = vals(R.cnt, (m+1)*30, m*30); cntM.push(a.length ? Math.round(mean(a)) : "なし"); }
+  const L = [
+    "【仕入れ相談】この商品、仕入れるべき？グラフを読んで判断して",
+    "JAN/コード: " + ($("code").value.trim() || "-") + " ／ ASIN: " + p.asin,
+    "商品: " + (p.title || "") + "（" + (p.brand || p.manufacturer || "メーカー不明") + "）",
+    "店の値段: ¥" + n(R.cost) + " ／ 売り方: " + (R.mode === "fba" ? "FBA" : "自己発送") + " ／ 送料の予想: ¥" + n(R.ship),
+  ];
+  if (R.main) L.push("今の売値: ¥" + n(R.now) + "（" + (R.cartNow ? "カート" : "新品の最安値") + "）→ 利益 ¥" + n(R.main.profit) + "（" + pct(R.main.rate) + "・手数料" + S.fee + "%" + (R.mode === "fba" ? "＋FBA手数料¥" + n(R.fba) : "") + "）");
+  L.push("サイトの見立て: " + R.head);
+  L.push("90日平均 ¥" + n(R.a90) + " ／ 30日平均 ¥" + n(R.a30) + " ／ 90日の底 ¥" + n(R.lo90) + " ／ Amazon本体 " + (R.amazonNow ? "¥" + n(R.amazonNow) : "なし"));
+  L.push("ランキング 今" + n(R.rank) + "位 ／ 30日で約" + R.drops30 + "回・90日で約" + R.drops90 + "回売れた ／ 新品の出品者 " + R.offers + "人");
+  L.push("週ごとの値段（26週・古い順）: " + weeks.join(" / "));
+  L.push("月ごとのランキング（12か月・古い順）: " + months.join(" / "));
+  L.push("月ごとのAmazon本体がいた日数（12か月・古い順）: " + amzM.join(" / "));
+  L.push("月ごとの新品の出品者数（6か月・古い順）: " + cntM.join(" / "));
+  L.push("基準: 費用を全部引いて利益率20%以上が基本、15%以上なら可");
+  return L.join("\n");
 }
 function pickList(ps, cost, ship, md){
   let h = '<div class="card"><h2>このJANのページが ' + ps.length + ' つあります。どれですか？</h2><div class="pick">';
