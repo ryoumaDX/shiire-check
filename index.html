@@ -155,6 +155,11 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <label class="wide" for="s_allowed">出品できるメーカー（カンマ区切り）<textarea id="s_allowed"></textarea></label>
       <label class="wide" for="s_blocked">出品規制ありのメーカー（こちらが優先）<textarea id="s_blocked"></textarea></label>
     </div>
+    <details id="shareBox" style="margin-top:12px">
+      <summary>ほかのスマホに設定を移す（QRコード）</summary>
+      <p class="note">移したいスマホのカメラでこのQRコードを読むと、キーと設定がそのスマホに入ります。QRコードはキーそのものなので、人に見せたり写真に残したりしないでください。</p>
+      <div id="qr" style="background:#fff;padding:12px;border-radius:10px;width:max-content;max-width:100%"></div>
+    </details>
     <div class="btns">
       <button type="button" id="setReset">元に戻す</button>
       <button value="cancel" formnovalidate>閉じる</button>
@@ -191,7 +196,36 @@ $("setForm").addEventListener("submit", e => {
   }
 });
 function showKeyNote(){ $("needKey").hidden = !!S.key; }
+
+/* ---------- 設定をQRコードでほかのスマホへ ---------- */
+// URLの「#」より後ろはサーバーに送られない。読み込んだらすぐ履歴から消す
+const b64 = s => btoa(unescape(encodeURIComponent(s))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const unb64 = s => decodeURIComponent(escape(atob(s.replace(/-/g,"+").replace(/_/g,"/"))));
+(function importSetup(){
+  const m = location.hash.match(/^#setup=([\w-]+)$/); if (!m) return;
+  try { history.replaceState(null, "", location.pathname + location.search); } catch(e){ location.hash = ""; }
+  try {
+    const got = JSON.parse(unb64(m[1])); const keep = {};
+    FIELDS.forEach(f => { if (got[f] != null) keep[f] = got[f]; });
+    S = Object.assign({}, S, keep); save(S);
+    window.__setupMsg = "設定を読み込みました。このスマホで使えます。";
+  } catch(e){ window.__setupMsg = "設定のQRコードを読めませんでした。もう一度読み取ってください。"; }
+})();
 showKeyNote();
+if (window.__setupMsg) $("out").innerHTML = '<div class="msg">' + esc(window.__setupMsg) + '</div>';
+function loadQrLib(){ return new Promise((ok, ng) => { if (window.QRCode) return ok();
+  const s = document.createElement("script"); s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"; s.onload = ok; s.onerror = ng; document.head.appendChild(s); }); }
+$("shareBox").addEventListener("toggle", async () => {
+  if (!$("shareBox").open) { $("qr").innerHTML = ""; return; }
+  const box = $("qr"); box.innerHTML = "";
+  if (!S.key){ box.textContent = "先にキーを入れて保存してください。"; return; }
+  try {
+    await loadQrLib();
+    const data = {}; FIELDS.forEach(f => data[f] = S[f]);
+    const url = location.origin + location.pathname + "#setup=" + b64(JSON.stringify(data));
+    new QRCode(box, {text:url, width:240, height:240, correctLevel:QRCode.CorrectLevel.L});
+  } catch(e){ box.textContent = "QRコードを作れませんでした。電波を確かめてください。"; }
+});
 
 /* ---------- 履歴 ---------- */
 function getHist(){ try{ return JSON.parse(localStorage.getItem(LH)||"[]"); }catch(e){ return []; } }
