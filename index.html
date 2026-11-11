@@ -35,8 +35,8 @@ h1{font-size:20px;margin:0;letter-spacing:.02em}
 .tokens{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 button,input,select,textarea{font:inherit;color:inherit}
 .iconbtn{background:none;border:1px solid var(--line);border-radius:10px;padding:6px 10px;color:var(--muted);cursor:pointer}
-form.ask{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
-form.ask label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);min-width:0}
+form.ask{display:grid;grid-template-columns:1fr 1fr 64px;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+form.ask label{display:flex;flex-direction:column;justify-content:flex-end;gap:4px;font-size:13px;color:var(--muted);min-width:0}
 form.ask .wide{grid-column:1/-1}
 input[type=text],input[type=number],input[type=password],input[type=tel],textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:18px;min-width:0}
 textarea{font-size:14px;min-height:64px}
@@ -135,11 +135,14 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
         <label><input type="radio" name="mode" value="self" id="modeSelf">自己発送</label>
       </span>
     </label>
-    <label for="cost">店の値段（税込・1個）
+    <label for="cost">店の値段（税込）
       <input type="tel" id="cost" inputmode="numeric" placeholder="2530">
     </label>
-    <label for="ship"><span id="shipLabel">納品送料の予想（1個）</span>
+    <label for="ship"><span id="shipLabel">納品送料（予想）</span>
       <input type="tel" id="ship" inputmode="numeric" placeholder="100">
+    </label>
+    <label for="qty">個数
+      <input type="tel" id="qty" inputmode="numeric" placeholder="1">
     </label>
     <button class="go" id="go" type="submit">調べる</button>
   </form>
@@ -206,7 +209,7 @@ function shipMem(){ try{ return JSON.parse(localStorage.getItem(LSHIP)||"{}"); }
 function mode(){ return $("modeSelf").checked ? "self" : "fba"; }
 function syncShip(){
   const m = mode(), mem = shipMem();
-  $("shipLabel").textContent = m === "fba" ? "納品送料の予想（1個）" : "送料の予想（1個）";
+  $("shipLabel").textContent = m === "fba" ? "納品送料（予想）" : "送料（予想）";
   $("ship").placeholder = m === "fba" ? "100" : "230";
   $("ship").value = mem[m] != null ? mem[m] : "";
 }
@@ -349,8 +352,8 @@ function readGraph(R){
   // 2. 売れ行き
   const d30 = R.drops30, d90 = R.drops90;
   const rk30 = median(vals(K,30,0)), rkPrev = median(vals(K,120,30));
-  if (d30 >= 10){ score += 1; say.push("売れ行きは良く、30日で約" + d30 + "回売れています。"); }
-  else if (d30 >= 3) say.push("30日で約" + d30 + "回売れています（ふつう）。");
+  if (d30 >= 10) score += 1;          // 売れた回数の文は、下の「売れるまでの日数」にまとめて書く
+  else if (d30 >= 3) {}
   else { score -= 2; say.push("30日で" + (d30 ? "約" + d30 + "回" : "ほとんど") + "しか売れていません。売れるまで時間がかかりそうです。"); }
   // 1年の人気の流れ：今（直近60日）と1年前（300〜365日前）のランキング
   const rkNow = median(vals(K,60,0)), rkYear = median(vals(K,365,300));
@@ -364,14 +367,31 @@ function readGraph(R){
     else if (rk30 < rkPrev * 0.6) flags.push(["good", "ランキングが上がってきています（約" + Math.round(rkPrev).toLocaleString() + "位 → 約" + Math.round(rk30).toLocaleString() + "位）"]);
   }
 
-  // 3. ライバル
-  const share = d30 / (R.offers + 1);
-  const c30 = mean(vals(C,30,0)), cPrev = mean(vals(C,120,30));
-  if (R.offers){
-    if (c30 && cPrev && c30 > cPrev*1.4 && c30 - cPrev >= 3){ score -= 1; say.push("出品者が増えています（約" + Math.round(cPrev) + "人 → 今" + R.offers + "人）。値下げ合戦になりやすいです。"); }
-    else if (c30 && cPrev && c30 < cPrev*0.8) flags.push(["good", "出品者は減っています（約" + Math.round(cPrev) + "人 → 今" + R.offers + "人）"]);
-    flags.push([share >= 1 ? "good" : "warn", "新品の出品者 " + R.offers + "人。自分の分は月に約" + (Math.round(share*10)/10) + "個売れる見込み"]);
-  }
+  // 3. ライバル（出品者の増え方）と、売れるまでの日数
+  const cNow = R.offers, c1w = mean(vals(C,10,4)), c1m = mean(vals(C,37,23)), c3m = mean(vals(C,97,83));
+  const r = v => v == null ? null : Math.round(v);
+  let cTxt = "新品の出品者は今" + cNow + "人";
+  const past = [c1m != null ? "1か月前 約" + r(c1m) + "人" : "", c3m != null ? "3か月前 約" + r(c3m) + "人" : ""].filter(Boolean);
+  if (past.length) cTxt += "（" + past.join("・") + "）";
+  if (c1w != null && cNow - c1w >= 3){ score -= 1; cTxt += "。この1週間で約" + r(cNow - c1w) + "人増えていて、値下げ合戦になりやすいです"; }
+  else if (c1m != null && cNow >= c1m*1.3 && cNow - c1m >= 2){ score -= 1; cTxt += "。増えてきていて、値下げ合戦になりやすいです"; }
+  else if (c3m != null && cNow >= c3m*1.5 && cNow - c3m >= 3){ cTxt += "。この3か月で増えています"; flags.push(["warn", "出品者がこの3か月で増えています（約" + r(c3m) + "人 → " + cNow + "人）"]); }
+  else if (c1m != null && cNow <= c1m*0.75 && c1m - cNow >= 2) cTxt += "。減ってきていて、よい材料です";
+  else if (c3m != null && cNow <= c3m*0.7 && c3m - cNow >= 3) cTxt += "。この3か月で減っていて、よい材料です";
+  else cTxt += "。大きな増減はありません";
+  say.push(cTxt + "。");
+  // 1か月の販売回数を、自分を含めた出品者で分ける（ランキングの下がった回数なので、実際はもう少し売れていることが多い）
+  const qty = R.qty || 1;
+  if (d30 > 0){
+    const share = d30 / (cNow + 1), dOne = Math.max(1, Math.round(30 / share)), dAll = Math.max(1, Math.round(30 * qty / share));
+    const sh = Math.round(share*10)/10;
+    let t = (d30 >= 10 ? "売れ行きは良く、" : "") + "30日で約" + d30 + "回売れているので、自分の分は月に約" + sh + "個。";
+    t += qty > 1 ? qty + "個全部売れるまで約" + dAll + "日（1個目は約" + dOne + "日）の見込みです。" : "売れるまで約" + dOne + "日の見込みです。";
+    if (dAll > 90){ score -= 2; t += "かなり長くかかります。"; }
+    else if (dAll > 60){ score -= 1; t += "2か月以上かかりそうです。"; }
+    say.push(t);
+    R.days = {one:dOne, all:dAll, share:sh};
+  } else say.push("この1か月ほとんど売れていないので、売れるまでの日数は見込めません。");
 
   // 4. Amazon本体
   const amzDays = vals(A,180,0).length, amzNow = pos(R.amazonNow);
@@ -396,11 +416,11 @@ function readGraph(R){
   return {tone, score, say, flags, trend};
 }
 
-function analyze(p, cost, ship, md){
+function analyze(p, cost, ship, md, qty){
   const st = p.stats || {}, cur = st.current || [];
   const cartSer = series(p.csv, 18, 3), newSer = series(p.csv, 1, 2);
   const priceSer = cartSer.length ? cartSer : newSer;
-  const R = {p, cost, ship, mode:md,
+  const R = {p, cost, ship, mode:md, qty: qty || 1,
     cartNow: pos(cur[18]), newNow: pos(cur[1]), amazonNow: pos(cur[0]),
     cartSer, newSer, amzSer: series(p.csv, 0, 2), rankSer: series(p.csv, 3, 2),
     drops30: st.salesRankDrops30 > 0 ? st.salesRankDrops30 : 0, drops90: st.salesRankDrops90 > 0 ? st.salesRankDrops90 : 0,
@@ -531,12 +551,13 @@ function askText(R){
     "【仕入れ相談】この商品、仕入れるべき？グラフを読んで判断して",
     "JAN/コード: " + ($("code").value.trim() || "-") + " ／ ASIN: " + p.asin,
     "商品: " + (p.title || "") + "（" + (p.brand || p.manufacturer || "メーカー不明") + "）",
-    "店の値段: ¥" + n(R.cost) + " ／ 売り方: " + (R.mode === "fba" ? "FBA" : "自己発送") + " ／ 送料の予想: ¥" + n(R.ship),
+    "店の値段: ¥" + n(R.cost) + " ×" + R.qty + "個 ／ 売り方: " + (R.mode === "fba" ? "FBA" : "自己発送") + " ／ 送料の予想: ¥" + n(R.ship),
   ];
   if (R.main) L.push("今の売値: ¥" + n(R.now) + "（" + (R.cartNow ? "カート" : "新品の最安値") + "）→ 利益 ¥" + n(R.main.profit) + "（" + pct(R.main.rate) + "・手数料" + S.fee + "%" + (R.mode === "fba" ? "＋FBA手数料¥" + n(R.fba) : "") + "）");
   L.push("サイトの見立て: " + R.head);
   L.push("90日平均 ¥" + n(R.a90) + " ／ 30日平均 ¥" + n(R.a30) + " ／ 90日の底 ¥" + n(R.lo90) + " ／ Amazon本体 " + (R.amazonNow ? "¥" + n(R.amazonNow) : "なし"));
   L.push("ランキング 今" + n(R.rank) + "位 ／ 30日で約" + R.drops30 + "回・90日で約" + R.drops90 + "回売れた ／ 新品の出品者 " + R.offers + "人");
+  if (R.days) L.push("サイトの見込み: 自分の分は月に約" + R.days.share + "個、" + (R.qty > 1 ? R.qty + "個全部売れるまで約" + R.days.all + "日" : "売れるまで約" + R.days.one + "日"));
   L.push("週ごとの値段（26週・古い順）: " + weeks.join(" / "));
   L.push("月ごとのランキング（12か月・古い順）: " + months.join(" / "));
   L.push("月ごとのAmazon本体がいた日数（12か月・古い順）: " + amzM.join(" / "));
@@ -544,12 +565,12 @@ function askText(R){
   L.push("基準: 費用を全部引いて利益率20%以上が基本、15%以上なら可");
   return L.join("\n");
 }
-function pickList(ps, cost, ship, md){
+function pickList(ps, cost, ship, md, qty){
   let h = '<div class="card"><h2>このJANのページが ' + ps.length + ' つあります。どれですか？</h2><div class="pick">';
   ps.forEach((p,i) => { const c = p.stats && p.stats.current || []; const v = pos(c[18]) || pos(c[1]);
     h += '<button type="button" data-i="'+i+'">' + esc(p.title || p.asin) + '<br><span class="note">' + esc(p.asin) + ' ・ ' + (v ? yen(v) : "値段なし") + '</span></button>'; });
   $("out").innerHTML = h + '</div></div>';
-  $("out").querySelectorAll("[data-i]").forEach(b => b.onclick = () => render(analyze(ps[+b.dataset.i], cost, ship, md)));
+  $("out").querySelectorAll("[data-i]").forEach(b => b.onclick = () => render(analyze(ps[+b.dataset.i], cost, ship, md, qty)));
 }
 
 /* ---------- 実行 ---------- */
@@ -557,7 +578,7 @@ let busy = false;
 async function run(){
   if (busy) return;
   const q = parseCode($("code").value), num = id => Number(String($(id).value).replace(/[^\d]/g, "")) || 0;
-  const cost = num("cost"), ship = num("ship"), md = mode();
+  const cost = num("cost"), ship = num("ship"), qty = num("qty") || 1, md = mode();
   if (!S.key){ $("out").innerHTML = '<div class="msg err">「設定」で Keepa の API キーを入れてください。</div>'; return; }
   if (!q){ $("out").innerHTML = '<div class="msg err">JAN（8桁か13桁の数字）か ASIN（10文字）を入れてください。</div>'; return; }
   if (!cost){ $("out").innerHTML = '<div class="msg err">店の値段（税込）を入れてください。</div>'; return; }
@@ -568,7 +589,7 @@ async function run(){
     const ps = (d.products || []).filter(p => p && p.title);
     if (!ps.length){ $("out").innerHTML = '<div class="msg">Amazon にこの商品のページが見つかりませんでした（' + esc(q.v) + '）。</div>'; return; }
     addHist({code:q.v, cost, label:(ps[0].title||"").slice(0,14)});
-    if (ps.length > 1) pickList(ps, cost, ship, md); else render(analyze(ps[0], cost, ship, md));
+    if (ps.length > 1) pickList(ps, cost, ship, md, qty); else render(analyze(ps[0], cost, ship, md, qty));
   } catch(e){
     $("out").innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
   } finally { busy = false; $("go").disabled = false; $("go").textContent = "調べる"; }
