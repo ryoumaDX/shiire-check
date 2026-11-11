@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>仕入れ判定</title>
+<style>
+/* 1列のスマホ用。上に入力、下に判定→利益→相場→注意の順 */
+:root{
+  --bg:#f4f6f5; --card:#ffffff; --fg:#17201c; --muted:#5d6b64; --line:#d8dfdb;
+  --accent:#0f6b4f; --accent-fg:#ffffff;
+  --buy:#0f7a3d; --buy-bg:#e3f4e8; --maybe:#9a6200; --maybe-bg:#fdf1d8; --no:#b42318; --no-bg:#fde7e4;
+  --chart-cart:#0f6b4f; --chart-new:#8a9a92; --chart-line:#b42318;
+  --font: "Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#101513; --card:#1a211e; --fg:#e8eeeb; --muted:#9aa8a1; --line:#2f3a35;
+  --accent:#3fbf8c; --accent-fg:#06140e;
+  --buy:#5fd38f; --buy-bg:#163223; --maybe:#f2b84b; --maybe-bg:#3a2c10; --no:#ff8a7a; --no-bg:#3d1a16;
+  --chart-cart:#3fbf8c; --chart-new:#7d8b85; --chart-line:#ff8a7a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#101513; --card:#1a211e; --fg:#e8eeeb; --muted:#9aa8a1; --line:#2f3a35;
+  --accent:#3fbf8c; --accent-fg:#06140e;
+  --buy:#5fd38f; --buy-bg:#163223; --maybe:#f2b84b; --maybe-bg:#3a2c10; --no:#ff8a7a; --no-bg:#3d1a16;
+  --chart-cart:#3fbf8c; --chart-new:#7d8b85; --chart-line:#ff8a7a; color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:16px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(32px + env(safe-area-inset-bottom,0px))}
+main{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:14px;padding-block:14px}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+h1{font-size:20px;margin:0;letter-spacing:.02em}
+.tokens{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+button,input,select,textarea{font:inherit;color:inherit}
+.iconbtn{background:none;border:1px solid var(--line);border-radius:10px;padding:6px 10px;color:var(--muted);cursor:pointer}
+form.ask{display:grid;grid-template-columns:1fr 1fr;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+form.ask label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);min-width:0}
+form.ask .wide{grid-column:1/-1}
+input[type=text],input[type=number],input[type=password],input[type=tel],textarea,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:18px;min-width:0}
+textarea{font-size:14px;min-height:64px}
+.row{display:flex;gap:8px;align-items:stretch}
+.row input{flex:1}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg label{flex:1;flex-direction:row;justify-content:center;align-items:center;padding:10px 4px;cursor:pointer;color:var(--fg);font-size:15px}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--accent);color:var(--accent-fg)}
+.go{grid-column:1/-1;padding:14px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-fg);font-size:18px;font-weight:700;cursor:pointer}
+.go:disabled{opacity:.6}
+.cam{padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);cursor:pointer;white-space:nowrap}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.msg{padding:12px 14px;border-radius:12px;background:var(--maybe-bg);color:var(--fg)}
+.msg.err{background:var(--no-bg)}
+.verdict{border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:6px}
+.verdict.buy{background:var(--buy-bg)} .verdict.maybe{background:var(--maybe-bg)} .verdict.no{background:var(--no-bg)}
+.verdict .big{font-size:28px;font-weight:800;line-height:1.2}
+.verdict.buy .big{color:var(--buy)} .verdict.maybe .big{color:var(--maybe)} .verdict.no .big{color:var(--no)}
+.verdict .sub{font-size:15px}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kpi{display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi b{font-size:20px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.kpi span{font-size:12px;color:var(--muted)}
+.prod{display:flex;gap:12px;align-items:flex-start}
+.prod img{width:72px;height:72px;object-fit:contain;background:#fff;border-radius:8px;flex:none}
+.prod .t{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.prod .m{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+h2{font-size:15px;margin:0;color:var(--muted);font-weight:700;letter-spacing:.04em}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:15px}
+td{padding:5px 0;border-bottom:1px solid var(--line)}
+td:last-child{text-align:right;white-space:nowrap}
+tr.total td{font-weight:800;border-bottom:0;font-size:17px}
+.note{font-size:12px;color:var(--muted)}
+ul.flags{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+ul.flags li{padding:8px 10px;border-radius:10px;font-size:14px;display:flex;gap:8px}
+ul.flags li::before{font-weight:800;flex:none}
+ul.flags li.bad{background:var(--no-bg)} ul.flags li.bad::before{content:"×";color:var(--no)}
+ul.flags li.warn{background:var(--maybe-bg)} ul.flags li.warn::before{content:"!";color:var(--maybe)}
+ul.flags li.good{background:var(--buy-bg)} ul.flags li.good::before{content:"○";color:var(--buy)}
+.chart svg{width:100%;height:auto;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:4px}
+.links{display:flex;flex-wrap:wrap;gap:8px}
+.links a{flex:1 1 30%;text-align:center;padding:10px 6px;border:1px solid var(--line);border-radius:10px;color:var(--accent);text-decoration:none;font-size:14px;min-width:0}
+.pick{display:flex;flex-direction:column;gap:8px}
+.pick button{text-align:left;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);cursor:pointer;font-size:14px}
+details summary{cursor:pointer;color:var(--muted);font-size:14px}
+.hist{display:flex;flex-wrap:wrap;gap:6px}
+.hist button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--fg);padding:16px;width:min(520px,calc(100vw - 32px));max-height:85vh}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+.set{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.set label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);min-width:0}
+.set .wide{grid-column:1/-1}
+.set input{font-size:16px;padding:10px}
+.btns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.btns button{padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--bg);cursor:pointer}
+.btns .primary{background:var(--accent);color:var(--accent-fg);border:0}
+#reader{width:100%;border-radius:12px;overflow:hidden}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>仕入れ判定</h1>
+    <div class="row" style="align-items:center">
+      <span class="tokens" id="tokens"></span>
+      <button class="iconbtn" id="openSet" type="button">設定</button>
+    </div>
+  </header>
+
+  <div class="msg" id="needKey" hidden>最初に「設定」で Keepa の API キーを入れてください。キーはこのスマホの中だけに保存されます。</div>
+
+  <form class="ask" id="ask" autocomplete="off">
+    <label class="wide" for="code">JAN または ASIN
+      <span class="row">
+        <input type="text" id="code" inputmode="text" placeholder="4522327980064" enterkeyhint="next">
+        <button class="cam" type="button" id="camBtn">カメラ</button>
+      </span>
+    </label>
+    <div id="reader" class="wide" hidden></div>
+    <label for="cost">店の値段（税込・1個）
+      <input type="tel" id="cost" inputmode="numeric" placeholder="2530" enterkeyhint="go">
+    </label>
+    <label>売り方
+      <span class="seg">
+        <label><input type="radio" name="mode" value="fba" id="modeFba" checked>FBA</label>
+        <label><input type="radio" name="mode" value="self" id="modeSelf">自己発送</label>
+      </span>
+    </label>
+    <button class="go" id="go" type="submit">調べる</button>
+  </form>
+
+  <div class="hist" id="hist"></div>
+  <div id="out"></div>
+</main>
+
+<dialog id="setDlg">
+  <form method="dialog" id="setForm">
+    <h2 style="margin-bottom:10px">設定（このスマホの中だけに保存）</h2>
+    <div class="set">
+      <label class="wide" for="s_key">Keepa の API キー
+        <input type="password" id="s_key" autocomplete="off">
+      </label>
+      <label for="s_good">買いの利益率（%）<input type="number" id="s_good" step="1"></label>
+      <label for="s_ok">最低の利益率（%）<input type="number" id="s_ok" step="1"></label>
+      <label for="s_floor">最低の利益（円）<input type="number" id="s_floor" step="10"></label>
+      <label for="s_self">自己発送の送料（円）<input type="number" id="s_self" step="10"></label>
+      <label for="s_ship">FBA納品送料 1個（円）<input type="number" id="s_ship" step="10"></label>
+      <label for="s_pack">資材・ラベル 1個（円）<input type="number" id="s_pack" step="10"></label>
+      <label for="s_months">売れるまでの月数<input type="number" id="s_months" step="1"></label>
+      <label for="s_ret">返品の引当（%）<input type="number" id="s_ret" step="0.5"></label>
+      <label class="wide" for="s_allowed">出品できるメーカー（カンマ区切り）<textarea id="s_allowed"></textarea></label>
+      <label class="wide" for="s_blocked">出品規制ありのメーカー（こちらが優先）<textarea id="s_blocked"></textarea></label>
+    </div>
+    <div class="btns">
+      <button type="button" id="setReset">元に戻す</button>
+      <button value="cancel" formnovalidate>閉じる</button>
+      <button class="primary" id="setSave" value="save">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+const DEF = {
+  key:"", good:20, ok:15, floor:300, self:750, ship:100, perKg:150, pack:30, months:2, ret:2, storageRate:10.087,
+  allowed:"サーモス,THERMOS,バンダイナムコ,バンダイ,BANDAI,エレコム,ELECOM,ロッテ,LOTTE,カルビー,Calbee,タカラトミー,TAKARA TOMY,TOMY",
+  blocked:"BANDAI SPIRITS,バンダイスピリッツ,Bandai Hobby,BANDAI HOBBY,三英貿易,タカラトミーアーツ,バンダイナムコヌイ"
+};
+const LS = "shiireCheck.v1", LH = "shiireCheck.hist";
+function load(){ try{ return Object.assign({}, DEF, JSON.parse(localStorage.getItem(LS)||"{}")); }catch(e){ return Object.assign({}, DEF); } }
+function save(s){ try{ localStorage.setItem(LS, JSON.stringify(s)); }catch(e){} }
+let S = load();
+const $ = id => document.getElementById(id);
+const yen = n => (n<0?"−":"") + "¥" + Math.abs(Math.round(n)).toLocaleString("ja-JP");
+const pct = n => (Math.round(n*10)/10).toFixed(1) + "%";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ---------- 設定 ---------- */
+const FIELDS = ["key","good","ok","floor","self","ship","pack","months","ret","allowed","blocked"];
+function fillSet(src){ FIELDS.forEach(f => { $("s_"+f).value = src[f]; }); }
+$("openSet").onclick = () => { fillSet(S); $("setDlg").showModal(); };
+$("setReset").onclick = () => { const k = $("s_key").value; fillSet(Object.assign({}, DEF, {key:k})); };
+$("setForm").addEventListener("submit", e => {
+  if (e.submitter && e.submitter.value === "save") {
+    FIELDS.forEach(f => { const v = $("s_"+f).value; S[f] = (typeof DEF[f] === "number") ? Number(v) : v.trim(); });
+    save(S); showKeyNote();
+  }
+});
+function showKeyNote(){ $("needKey").hidden = !!S.key; }
+showKeyNote();
+
+/* ---------- 履歴 ---------- */
+function getHist(){ try{ return JSON.parse(localStorage.getItem(LH)||"[]"); }catch(e){ return []; } }
+function addHist(h){ try{ const a = getHist().filter(x => x.code !== h.code); a.unshift(h); localStorage.setItem(LH, JSON.stringify(a.slice(0,8))); }catch(e){} drawHist(); }
+function drawHist(){
+  const a = getHist(); const box = $("hist"); box.innerHTML = "";
+  a.forEach(h => { const b = document.createElement("button"); b.type = "button";
+    b.textContent = (h.label||h.code) + (h.cost ? " ¥"+h.cost : "");
+    b.onclick = () => { $("code").value = h.code; if (h.cost) $("cost").value = h.cost; run(); };
+    box.appendChild(b); });
+}
+drawHist();
+
+/* ---------- Keepa ---------- */
+const KT = t => (t + 21564000) * 60000;            // Keepaの時刻（分）→ ミリ秒
+function parseCode(raw){
+  const c = String(raw||"").toUpperCase().replace(/[^0-9A-Z]/g, "");
+  if (/^\d{8}$|^\d{12,14}$/.test(c)) return {type:"code", v:c};
+  if (/^[0-9A-Z]{10}$/.test(c)) return {type:"asin", v:c};
+  return null;
+}
+async function keepa(q){
+  const u = new URL("https://api.keepa.com/product");
+  u.search = new URLSearchParams({key:S.key, domain:"5", [q.type]:q.v, stats:"90", buybox:"1", history:"1", days:"180"}).toString();
+  let r, d;
+  try { r = await fetch(u.toString()); } catch(e){ throw new Error("Keepa につながりませんでした。電波を確かめてもう一度押してください。"); }
+  try { d = await r.json(); } catch(e){ d = {}; }
+  if (d.tokensLeft != null) $("tokens").textContent = "Keepa 残り " + d.tokensLeft;
+  if (r.status === 429) throw new Error("Keepa のトークンが足りません。" + (d.refillIn ? "約" + Math.ceil(d.refillIn/60000) + "分" : "少し") + "待ってからもう一度押してください。");
+  if (r.status === 401 || r.status === 402 || r.status === 403) throw new Error("Keepa の API キーが使えません。「設定」でキーを確かめてください。");
+  if (!r.ok || d.error) throw new Error("Keepa でエラーが出ました（" + r.status + "）。" + (d.error && d.error.message ? d.error.message : ""));
+  return d;
+}
+
+/* ---------- 計算 ---------- */
+function series(csv, idx, step){
+  const a = csv && csv[idx]; if (!a) return [];
+  const out = []; for (let i = 0; i + 1 < a.length; i += step){ const p = step === 3 ? (a[i+1] < 0 ? -1 : a[i+1] + Math.max(0, a[i+2])) : a[i+1]; out.push([KT(a[i]), p]); }
+  return out;
+}
+function minSince(ser, ms){ // 期間内の最安（出品なしは除く）。期間の直前の値も含める
+  let m = null, prev = null;
+  for (const [t,p] of ser){ if (t < ms){ prev = p; continue; } if (p > 0) m = m == null ? p : Math.min(m, p); }
+  if (prev > 0) m = m == null ? prev : Math.min(m, prev);
+  return m;
+}
+const pos = v => (v != null && v > 0) ? v : null;
+function costParts(P, sale, cost, mode){
+  const refRate = (P.ref || 11) / 100;
+  const ref = Math.max(33, Math.round(sale * refRate));
+  const ret = Math.round(sale * S.ret / 100);
+  const parts = [["仕入れ", cost], ["販売手数料（" + pct(refRate*100) + "）", ref]];
+  if (mode === "fba"){
+    parts.push(["FBA手数料" + (P.fbaKnown ? "" : "（Keepaになく仮の値）"), P.fba]);
+    parts.push(["納品送料", P.inShip]);
+    parts.push(["保管料（" + S.months + "か月）", P.storage]);
+  } else {
+    parts.push(["送料（自己発送）", S.self]);
+  }
+  parts.push(["資材・ラベル", S.pack], ["返品の引当（" + S.ret + "%）", ret]);
+  const total = parts.reduce((s,x) => s + x[1], 0);
+  return {parts, profit: sale - total, rate: (sale - total) / sale * 100, refRate};
+}
+function fixedCost(P, mode){ return mode === "fba" ? P.fba + P.inShip + P.storage + S.pack : S.self + S.pack; }
+function maxBuy(P, sale, mode, targetPct){ // この売値で目標の利益率・最低利益を残せる仕入れ値の上限
+  const refRate = (P.ref || 11) / 100;
+  const before = sale - Math.max(33, sale*refRate) - sale*S.ret/100 - fixedCost(P, mode);
+  return Math.floor(Math.min(before - sale*targetPct/100, before - S.floor) / 10) * 10;
+}
+function priceFor(P, cost, mode, targetPct){ // この仕入れ値で目標の利益率になる売値
+  const refRate = (P.ref || 11) / 100;
+  return Math.ceil((cost + fixedCost(P, mode)) / (1 - refRate - S.ret/100 - targetPct/100));
+}
+function brandCheck(brand){
+  const b = (brand||"").toUpperCase().replace(/\s/g, "");
+  const has = list => list.split(/[,、\n]/).map(x => x.trim().toUpperCase().replace(/\s/g, "")).filter(Boolean).find(x => b.includes(x));
+  if (!b) return {st:"unknown"};
+  const bl = has(S.blocked); if (bl) return {st:"blocked", hit:bl};
+  const ok = has(S.allowed); if (ok) return {st:"ok", hit:ok};
+  return {st:"unknown"};
+}
+
+function analyze(p, cost, mode){
+  const st = p.stats || {}, cur = st.current || [], a30 = st.avg30 || [], a90 = st.avg90 || [];
+  const cart = pos(cur[18]), newLow = pos(cur[1]), amazon = pos(cur[0]);
+  const now = cart || newLow;
+  const cartSer = series(p.csv, 18, 3), newSer = series(p.csv, 1, 2);
+  const avg30 = pos(a30[18]) || pos(a30[1]), avg90 = pos(a90[18]) || pos(a90[1]);
+  const d90 = Date.now() - 90*864e5;
+  const low90 = minSince(cartSer.length ? cartSer : newSer, d90);
+  const careful = [now, avg30, avg90].filter(Boolean).reduce((m,v) => Math.min(m,v), Infinity);
+  const L = p.packageLength, W = p.packageWidth, H = p.packageHeight, G = p.packageWeight;
+  const vol = (L>0 && W>0 && H>0) ? L*W*H/1000 : null;               // cm³
+  const fbaKnown = !!(p.fbaFees && p.fbaFees.pickAndPackFee > 0);
+  const P = {
+    ref: p.referralFeePercentage || p.referralFeePercent || null,
+    fba: fbaKnown ? p.fbaFees.pickAndPackFee : 450, fbaKnown,
+    inShip: S.ship + (G > 1000 ? Math.ceil((G-1000)/1000) * S.perKg : 0),
+    storage: vol ? Math.round(vol/1000 * S.storageRate * S.months) : 30, volKnown: !!vol
+  };
+  const offers = cur[11] > 0 ? cur[11] : (st.totalOfferCount > 0 ? st.totalOfferCount : 0);
+  const offers30 = pos(a30[11]);
+  const drops30 = st.salesRankDrops30 > 0 ? st.salesRankDrops30 : 0, drops90 = st.salesRankDrops90 > 0 ? st.salesRankDrops90 : 0;
+  const rank = pos(cur[3]);
+  const R = {p, P, cart, newLow, now, amazon, avg30, avg90, low90, careful: isFinite(careful) ? careful : null,
+             cartSer, newSer, offers, offers30, drops30, drops90, rank, mode, cost};
+  if (!now) return Object.assign(R, {verdict:"no", head:"判定できません", sub:"今、新品の出品がありません（Keepa に値段がない）。", flags:[["bad","新品の値段が分からないので、利益を計算できません。"]]});
+
+  R.main = costParts(P, now, cost, mode);
+  R.atCareful = R.careful && R.careful !== now ? costParts(P, R.careful, cost, mode) : null;
+  R.atLow = R.low90 && R.low90 < now ? costParts(P, R.low90, cost, mode) : null;
+  R.max20 = maxBuy(P, now, mode, S.good); R.max15 = maxBuy(P, now, mode, S.ok);
+  R.max15c = R.careful ? maxBuy(P, R.careful, mode, S.ok) : null;
+  R.p15 = priceFor(P, cost, mode, S.ok);
+
+  const F = [], rate = R.main.rate, prof = R.main.profit;
+  let hardNo = false, soft = 0;
+  // 利益
+  if (rate >= S.good && prof >= S.floor) F.push(["good", "利益率 " + pct(rate) + "（" + S.good + "%以上）"]);
+  else if (rate >= S.ok && prof >= S.floor){ F.push(["warn", "利益率 " + pct(rate) + "（" + S.ok + "〜" + S.good + "%）"]); soft++; }
+  else { hardNo = true; F.push(["bad", rate < S.ok ? "利益率 " + pct(rate) + "で、" + S.ok + "%に届きません" : "利益 " + yen(prof) + "で、最低の " + yen(S.floor) + " に届きません"]); }
+  // 値動き
+  if (R.atCareful && R.atCareful.rate < S.ok){ F.push(["warn", "30日・90日の平均で売ると " + yen(R.careful) + "・利益率 " + pct(R.atCareful.rate) + "。今の値段は平均より高めです"]); soft++; }
+  if (avg90 && now < avg90 * 0.9) { F.push(["warn", "今は90日平均（" + yen(avg90) + "）より " + Math.round((1-now/avg90)*100) + "%安く、下がってきています"]); soft++; }
+  else if (avg90 && now > avg90 * 1.3) { F.push(["warn", "今は90日平均（" + yen(avg90) + "）より " + Math.round((now/avg90-1)*100) + "%高く、一時的な値上がりかもしれません"]); soft++; }
+  if (R.atLow && R.atLow.profit < 0) F.push(["warn", "この90日の最安 " + yen(R.low90) + " まで下がると赤字（" + yen(R.atLow.profit) + "）"]);
+  // 本体・カート
+  if (amazon){ if (amazon <= now * 1.05){ hardNo = true; F.push(["bad", "Amazon本体が " + yen(amazon) + " で売っています。カートはほぼ取れません"]); } else { F.push(["warn", "Amazon本体も " + yen(amazon) + " で出品中。値下げしてくると勝てません"]); soft++; } }
+  if (!cart){ F.push(["warn", "今カートを取っている人がいません。売値は新品の最安値で計算しています"]); soft++; }
+  // 売れ行き
+  if (drops30 >= 10) F.push(["good", "よく売れています（30日で約" + drops30 + "回）"]);
+  else if (drops30 >= 3) F.push(["good", "売れています（30日で約" + drops30 + "回）"]);
+  else { F.push(["warn", "売れ行きが遅めです（30日で約" + drops30 + "回・90日で約" + drops90 + "回）"]); soft++; }
+  const share = drops30 / (offers + 1);
+  if (offers) F.push([share >= 1 ? "good" : "warn", "新品の出品者 " + offers + "人" + (offers30 ? "（30日平均 " + Math.round(offers30) + "人）" : "") + "。自分の分は月に約" + (Math.round(share*10)/10) + "個の見込み"]);
+  if (offers30 && offers > offers30 * 1.5 && offers - offers30 >= 3){ F.push(["warn", "出品者が増えています。値下げ競争になりやすいです"]); soft++; }
+  // 費用の不明
+  if (mode === "fba" && !P.fbaKnown){ F.push(["warn", "FBA手数料が Keepa にないので仮に ¥450 で計算。セラーアプリで確かめてください"]); soft++; }
+  if (mode === "fba" && !P.volKnown) F.push(["warn", "大きさが分からず、保管料を仮に ¥30 にしています"]);
+  // 出品規制
+  const bc = brandCheck(p.brand || p.manufacturer);
+  if (bc.st === "blocked"){ hardNo = true; F.push(["bad", "出品規制ありのメーカー（" + esc(p.brand||p.manufacturer) + "）です"]); }
+  else if (bc.st === "ok") F.push(["good", "出品できるメーカー（" + esc(p.brand||p.manufacturer) + "）"]);
+  else { F.push(["warn", "メーカー（" + esc(p.brand||p.manufacturer||"不明") + "）は出品できるか未確認。セラーアプリで確かめてください"]); soft++; }
+
+  let verdict, head, sub;
+  if (hardNo){ verdict = "no"; head = "見送り"; }
+  else if (soft === 0){ verdict = "buy"; head = "買ってよさそう"; }
+  else { verdict = "maybe"; head = "条件つきで検討"; }
+  if (verdict === "no") sub = R.max15 > 0 ? S.ok + "%の利益率を残すなら " + yen(R.max15) + " 以下なら検討できます。" : "今の値段では、いくらで買っても利益が残りません。";
+  else sub = "利益 " + yen(prof) + "・利益率 " + pct(rate) + "。" + (R.max20 > cost ? S.good + "%を残せる上限は " + yen(R.max20) + "。" : "");
+  F.sort((a,b) => ({bad:0,warn:1,good:2})[a[0]] - ({bad:0,warn:1,good:2})[b[0]]);
+  return Object.assign(R, {verdict, head, sub, flags:F});
+}
+
+/* ---------- 表示 ---------- */
+function chart(R){
+  const ser = [R.cartSer, R.newSer].filter(s => s.length);
+  if (!ser.length) return "";
+  const t1 = Date.now(), t0 = t1 - 180*864e5;
+  const pts = s => { const o = []; let last = null;
+    for (const [t,p] of s){ if (t < t0){ last = p; continue; } if (!o.length && last != null) o.push([t0,last]); o.push([t,p]); }
+    if (!o.length && last != null) o.push([t0,last]); if (o.length) o.push([t1, o[o.length-1][1]]); return o; };
+  const daily = s => { const m = new Map(); // 1日ごとにまとめる（その日の最安。出品なしだけの日は -1）
+    for (const [t,p] of s){ const k = Math.floor(t/864e5); const o = m.get(k); m.set(k, o == null ? p : (p > 0 && (o <= 0 || p < o)) ? p : o); }
+    return [...m].map(([k,p]) => [k*864e5, p]); };
+  const cs = pts(daily(R.cartSer)), ns = pts(daily(R.newSer));
+  const vals = cs.concat(ns).map(x => x[1]).filter(v => v > 0).concat([R.p15]);
+  if (!vals.length) return "";
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi-lo)*0.1 || hi*0.1; lo = Math.max(0, lo-pad); hi = hi+pad;
+  const Wd = 340, Ht = 150, L = 44, Rt = 6, T = 8, B = 20;
+  const x = t => L + (t - t0) / (t1 - t0) * (Wd - L - Rt), y = v => T + (hi - v) / (hi - lo) * (Ht - T - B);
+  const path = s => { let d = "", pen = false, py = null;
+    for (const [t,p] of s){ if (p <= 0){ pen = false; continue; } const X = x(t).toFixed(1), Y = y(p).toFixed(1);
+      if (!pen){ d += "M" + X + " " + Y; pen = true; } else d += "H" + X + "V" + Y; } return d; };
+  const ticks = [lo + (hi-lo)*0.15, (lo+hi)/2, hi - (hi-lo)*0.15].map(v => Math.round(v/10)*10);
+  let g = ticks.map(v => '<line x1="'+L+'" x2="'+(Wd-Rt)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="var(--line)" stroke-width="1"/><text x="'+(L-4)+'" y="'+(y(v)+4)+'" font-size="10" text-anchor="end" fill="var(--muted)">'+v.toLocaleString()+'</text>').join("");
+  [180,90,30,0].forEach(dd => { const X = x(t1 - dd*864e5); g += '<text x="'+X+'" y="'+(Ht-5)+'" font-size="10" text-anchor="'+(dd===0?"end":dd===180?"start":"middle")+'" fill="var(--muted)">'+(dd? dd+"日前" : "今")+'</text>'; });
+  const p15y = y(R.p15);
+  g += '<line x1="'+L+'" x2="'+(Wd-Rt)+'" y1="'+p15y+'" y2="'+p15y+'" stroke="var(--chart-line)" stroke-width="1.5" stroke-dasharray="4 3"/>';
+  g += '<path d="'+path(ns)+'" fill="none" stroke="var(--chart-new)" stroke-width="1.5"/>';
+  g += '<path d="'+path(cs)+'" fill="none" stroke="var(--chart-cart)" stroke-width="2.2"/>';
+  return '<div class="card chart"><h2>180日の値段</h2><svg viewBox="0 0 '+Wd+' '+Ht+'" role="img" aria-label="180日の値段の動き">'+g+'</svg>'+
+    '<div class="legend"><span><i style="background:var(--chart-cart)"></i>カート</span><span><i style="background:var(--chart-new)"></i>新品の最安値</span><span><i style="background:var(--chart-line)"></i>利益率'+S.ok+'%になる売値 '+yen(R.p15)+'</span></div></div>';
+}
+function render(R){
+  const p = R.p, im = (p.images && p.images[0] && (p.images[0].m || p.images[0].l)) || (p.imagesCSV ? p.imagesCSV.split(",")[0] : "");
+  const img = im ? "https://m.media-amazon.com/images/I/" + im : "";
+  const asin = p.asin;
+  let h = '<div class="verdict ' + R.verdict + '"><div class="big">' + R.head + '</div><div class="sub">' + esc(R.sub) + '</div></div>';
+  h += '<div class="card"><div class="prod">' + (img ? '<img src="'+esc(img)+'" alt="">' : '') +
+       '<div style="min-width:0"><div class="t">' + esc(p.title || "（名前なし）") + '</div><div class="m">' + esc(p.brand || p.manufacturer || "") + ' ・ ' + esc(asin) + (R.rank ? ' ・ ランキング ' + R.rank.toLocaleString() + '位' : '') + '</div>' +
+       '<div class="m">店の商品と、型番・色・セット数が同じか確かめてください</div></div></div>';
+  if (R.main){
+    h += '<div class="kpis"><div class="kpi"><span>売値（'+(R.cart?"カート":"最安値")+'）</span><b>'+yen(R.now)+'</b></div><div class="kpi"><span>利益</span><b>'+yen(R.main.profit)+'</b></div><div class="kpi"><span>利益率</span><b>'+pct(R.main.rate)+'</b></div></div>';
+  }
+  h += '</div>';
+  h += '<div class="card"><h2>気になる点</h2><ul class="flags">' + R.flags.map(f => '<li class="'+f[0]+'">'+f[1]+'</li>').join("") + '</ul></div>';
+  if (R.main){
+    h += '<div class="card"><h2>買ってよい値段の上限（今の売値で）</h2><table>' +
+      '<tr><td>利益率 ' + S.good + '%</td><td>' + (R.max20 > 0 ? yen(R.max20) : "なし") + '</td></tr>' +
+      '<tr><td>利益率 ' + S.ok + '%</td><td>' + (R.max15 > 0 ? yen(R.max15) : "なし") + '</td></tr>' +
+      (R.max15c != null && R.atCareful ? '<tr><td>利益率 ' + S.ok + '%（平均の売値 ' + yen(R.careful) + '）</td><td>' + (R.max15c > 0 ? yen(R.max15c) : "なし") + '</td></tr>' : '') +
+      '</table><div class="note">どれも最低の利益 ' + yen(S.floor) + ' も残る値段です。</div></div>';
+    h += chart(R);
+    h += '<div class="card"><h2>利益の内訳（' + (R.mode === "fba" ? "FBA" : "自己発送") + '）</h2><table><tr><td>売値</td><td>' + yen(R.now) + '</td></tr>' +
+      R.main.parts.map(x => '<tr><td>' + x[0] + '</td><td>−' + yen(x[1]).replace("¥","¥") + '</td></tr>').join("") +
+      '<tr class="total"><td>利益</td><td>' + yen(R.main.profit) + '</td></tr></table>' +
+      '<div class="note">90日平均 ' + (R.avg90 ? yen(R.avg90) : "不明") + ' ・ 30日平均 ' + (R.avg30 ? yen(R.avg30) : "不明") + ' ・ 90日の最安 ' + (R.low90 ? yen(R.low90) : "不明") + (R.amazon ? ' ・ Amazon本体 ' + yen(R.amazon) : ' ・ Amazon本体なし') + '</div></div>';
+  }
+  h += '<div class="links"><a href="https://www.amazon.co.jp/dp/'+asin+'" target="_blank" rel="noopener">Amazon</a><a href="https://keepa.com/#!product/5-'+asin+'" target="_blank" rel="noopener">Keepa</a><a href="https://sellercentral.amazon.co.jp/product-search/search?q='+asin+'" target="_blank" rel="noopener">出品できるか</a></div>';
+  $("out").innerHTML = h;
+}
+function pickList(ps, cost, mode){
+  let h = '<div class="card"><h2>このJANのページが ' + ps.length + ' つあります。どれですか？</h2><div class="pick">';
+  ps.forEach((p,i) => { const c = p.stats && p.stats.current || []; const v = pos(c[18]) || pos(c[1]);
+    h += '<button type="button" data-i="'+i+'">' + esc(p.title || p.asin) + '<br><span class="note">' + esc(p.asin) + ' ・ ' + (v ? yen(v) : "値段なし") + '</span></button>'; });
+  $("out").innerHTML = h + '</div></div>';
+  $("out").querySelectorAll("[data-i]").forEach(b => b.onclick = () => { const R = analyze(ps[+b.dataset.i], cost, mode); render(R); });
+}
+
+/* ---------- 実行 ---------- */
+let busy = false;
+async function run(){
+  if (busy) return;
+  const q = parseCode($("code").value), cost = Number(String($("cost").value).replace(/[^\d]/g, ""));
+  const mode = $("modeSelf").checked ? "self" : "fba";
+  if (!S.key){ $("out").innerHTML = '<div class="msg err">「設定」で Keepa の API キーを入れてください。</div>'; return; }
+  if (!q){ $("out").innerHTML = '<div class="msg err">JAN（8桁か13桁の数字）か ASIN（10文字）を入れてください。</div>'; return; }
+  if (!cost){ $("out").innerHTML = '<div class="msg err">店の値段（税込）を入れてください。</div>'; return; }
+  busy = true; $("go").disabled = true; $("go").textContent = "Keepa を見ています…";
+  $("out").innerHTML = "";
+  try {
+    const d = await keepa(q);
+    const ps = (d.products || []).filter(p => p && p.title);
+    if (!ps.length){ $("out").innerHTML = '<div class="msg">Amazon にこの商品のページが見つかりませんでした（' + esc(q.v) + '）。</div>'; return; }
+    addHist({code:q.v, cost, label:(ps[0].title||"").slice(0,14)});
+    if (ps.length > 1) pickList(ps, cost, mode); else render(analyze(ps[0], cost, mode));
+  } catch(e){
+    $("out").innerHTML = '<div class="msg err">' + esc(e.message) + '</div>';
+  } finally { busy = false; $("go").disabled = false; $("go").textContent = "調べる"; }
+}
+$("ask").addEventListener("submit", e => { e.preventDefault(); document.activeElement && document.activeElement.blur(); run(); });
+$("code").addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); $("cost").focus(); } });
+
+/* ---------- カメラでバーコード ---------- */
+let scanner = null;
+function loadLib(){ return new Promise((ok, ng) => { if (window.Html5Qrcode) return ok();
+  const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"; s.onload = ok; s.onerror = ng; document.head.appendChild(s); }); }
+async function stopScan(){ if (scanner){ try{ await scanner.stop(); }catch(e){} scanner = null; } $("reader").hidden = true; $("camBtn").textContent = "カメラ"; }
+$("camBtn").onclick = async () => {
+  if (scanner) return stopScan();
+  try {
+    await loadLib();
+    $("reader").hidden = false; $("camBtn").textContent = "やめる";
+    scanner = new Html5Qrcode("reader", {formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A]});
+    await scanner.start({facingMode:"environment"}, {fps:10, qrbox:{width:260, height:120}}, txt => {
+      $("code").value = txt; stopScan(); if (navigator.vibrate) navigator.vibrate(80); $("cost").focus();
+    }, () => {});
+  } catch(e){
+    await stopScan();
+    $("out").innerHTML = '<div class="msg err">カメラを使えませんでした。ブラウザのカメラの許可を確かめるか、JAN を手で入れてください。</div>';
+  }
+};
+</script>
+</body>
+</html>
