@@ -312,10 +312,18 @@ function readGraph(R){
   if (!p90.length) say.push("この3か月の値段の記録がほとんどなく、流れが読めません。");
 
   // 1. 値段の流れ
+  // 週ごとの値段（26週・古い順）から「山」を探す：3〜20週前に今より12%以上高い山があり、そこから下っている
+  const wk = []; for (let w = 25; w >= 0; w--){ const a = vals(P, (w+1)*7, w*7); wk.push(a.length ? median(a) : null); }
+  let peak = null, peakAgo = null; wk.forEach((v,i) => { if (v != null && (peak == null || v > peak)){ peak = v; peakAgo = 25 - i; } });
+  const base = mean(wk.slice(0,6).filter(v => v != null));          // 半年前（26〜20週前）のふだんの値段
+  const last4 = wk.slice(-4).filter(v => v != null);
+  const mountain = peak && now && peak >= now*1.12 && peakAgo >= 3 && peakAgo <= 20 && last4.length >= 2 && last4[last4.length-1] <= last4[0];
   let trend = "flat";
   if (a7 && a30 && a90){
     const s1 = a7/a30 - 1, s2 = a30/a90 - 1, s3 = prev ? a90/prev - 1 : 0;
-    if (s1 < -0.04 && (s2 < -0.03 || s3 < -0.05)) trend = "down";
+    if (mountain) trend = "mountain";
+    else if (s1 < -0.04 && (s2 < -0.03 || s3 < -0.05)) trend = "down";
+    else if (s2 < -0.05 && s1 < -0.02) trend = "recentDown";
     else if (s2 < -0.06 && s3 < -0.03) trend = "down";
     else if (now > a90*1.25 && s1 > 0.08) trend = "spike";
     else if (s1 > 0.04 && s2 > 0.02) trend = "up";
@@ -323,12 +331,19 @@ function readGraph(R){
   }
   const cv = p90.length > 10 ? Math.sqrt(mean(p90.map(v => (v-a90)**2))) / a90 : 0;
   const band = yen(qlo) + "〜" + yen(qhi);
-  if (trend === "down"){ score -= 2; say.push("値段は" + (prev ? "半年前の約" + yen(prev) + "から" : "") + "下がり続けていて、今は " + yen(now) + "。まだ下がる流れです。"); }
+  if (trend === "mountain"){ score -= 1;
+    say.push("約" + peakAgo + "週前に " + yen(peak) + " まで上がった山があり、今はその下り坂です（今 " + yen(now) + "）。" +
+      (base && now < base*0.95 ? "山の前（半年前）の約" + yen(base) + "よりも下がっています。" :
+       base && now <= base*1.06 ? "山の前（半年前）の値段は約" + yen(base) + "で、元の水準に戻ってきたところです。" : "") +
+      "また上がる材料はグラフからは見えません。"); }
+  else if (trend === "recentDown"){ score -= 1; say.push("この1か月で値段が下がっています（90日平均 " + yen(a90) + " → 30日平均 " + yen(a30) + " → 今 " + yen(now) + "）。"); }
+  else if (trend === "down"){ score -= 2; say.push("値段は" + (prev ? "半年前の約" + yen(prev) + "から" : "") + "下がり続けていて、今は " + yen(now) + "。まだ下がる流れです。"); }
   else if (trend === "slide"){ score -= 1; say.push("値段はじわじわ下がっています（3〜6か月前の平均 約" + yen(prev) + " → この3か月 約" + yen(a90) + " → 今 " + yen(now) + "）。売るころにはもう少し安いかもしれません。"); }
   else if (trend === "spike"){ score -= 1; say.push("最近急に上がった値段です（90日平均 " + yen(a90) + " → 今 " + yen(now) + "）。元に戻ることが多いので、今の値段で売れる前提は危ないです。"); }
   else if (trend === "up"){ score += 1; say.push("値段は上がってきています（90日平均 " + yen(a90) + " → 今 " + yen(now) + "）。" + (now > a90*1.15 ? "ただ今は平均より" + Math.round((now/a90-1)*100) + "%高いので、少し下がる前提で見てください。" : "")); }
-  else if (a90){ if (cv < 0.08){ score += 1; say.push("値段は3か月、ふだんは " + band + " で安定しています。"); }
+  else if (a90){ if (cv < 0.08 && (qhi - qlo) / a90 < 0.1){ score += 1; say.push("値段は3か月、ふだんは " + band + " で安定しています。"); }
                  else say.push("値段は3か月、ふだんは " + band + " の間で動いています。"); }
+  if (qlo && now < qlo && trend !== "flat") flags.push(["warn", "今の " + yen(now) + " は、この3か月でいちばん安いあたりです。下がっている途中なら、まだ下がるかもしれません"]);
   if (cv >= 0.15){ score -= 1; flags.push(["warn", "値動きが大きい商品です（3か月のふだんの幅 " + band + "、底は " + yen(lo90) + "）"]); }
 
   // 2. 売れ行き
@@ -337,7 +352,14 @@ function readGraph(R){
   if (d30 >= 10){ score += 1; say.push("売れ行きは良く、30日で約" + d30 + "回売れています。"); }
   else if (d30 >= 3) say.push("30日で約" + d30 + "回売れています（ふつう）。");
   else { score -= 2; say.push("30日で" + (d30 ? "約" + d30 + "回" : "ほとんど") + "しか売れていません。売れるまで時間がかかりそうです。"); }
-  if (rk30 && rkPrev){
+  // 1年の人気の流れ：今（直近60日）と1年前（300〜365日前）のランキング
+  const rkNow = median(vals(K,60,0)), rkYear = median(vals(K,365,300));
+  const rel = R.p.releaseDate > 20000000 ? R.p.releaseDate : null;
+  const relTxt = rel ? "（発売は" + Math.floor(rel/10000) + "年" + Math.floor(rel/100)%100 + "月）" : "";
+  let yearDown = false;
+  if (rkNow && rkYear && rkNow > rkYear * 1.6){ yearDown = true; score -= 1; say.push("人気がゆっくり落ちています。ランキングは1年前の約" + Math.round(rkYear).toLocaleString() + "位から、今は約" + Math.round(rkNow).toLocaleString() + "位" + relTxt + "。"); }
+  else if (rkNow && rkYear && rkNow < rkYear * 0.6) flags.push(["good", "1年前より人気が上がっています（約" + Math.round(rkYear).toLocaleString() + "位 → 約" + Math.round(rkNow).toLocaleString() + "位）"]);
+  if (!yearDown && rk30 && rkPrev){
     if (rk30 > rkPrev * 1.6){ score -= 1; flags.push(["warn", "ランキングが下がってきています（約" + Math.round(rkPrev).toLocaleString() + "位 → 約" + Math.round(rk30).toLocaleString() + "位）。人気が落ちているかも"]); }
     else if (rk30 < rkPrev * 0.6) flags.push(["good", "ランキングが上がってきています（約" + Math.round(rkPrev).toLocaleString() + "位 → 約" + Math.round(rk30).toLocaleString() + "位）"]);
   }
@@ -347,6 +369,7 @@ function readGraph(R){
   const c30 = mean(vals(C,30,0)), cPrev = mean(vals(C,120,30));
   if (R.offers){
     if (c30 && cPrev && c30 > cPrev*1.4 && c30 - cPrev >= 3){ score -= 1; say.push("出品者が増えています（約" + Math.round(cPrev) + "人 → 今" + R.offers + "人）。値下げ合戦になりやすいです。"); }
+    else if (c30 && cPrev && c30 < cPrev*0.8) flags.push(["good", "出品者は減っています（約" + Math.round(cPrev) + "人 → 今" + R.offers + "人）"]);
     flags.push([share >= 1 ? "good" : "warn", "新品の出品者 " + R.offers + "人。自分の分は月に約" + (Math.round(share*10)/10) + "個売れる見込み"]);
   }
 
